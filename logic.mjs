@@ -1,8 +1,15 @@
 export const BOT_USERNAME = "avelio_premium_bot";
+export const CART_LIMIT = 150;
+export const CART_STORAGE_KEY = "cart";
+export const CART_STORAGE_MAX = 4096;
 
 const CODE_PATTERN = /^[A-Za-z]+-[0-9]+$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const START_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+// Два массива по 150 кодов длиной до 10 дают JSON не длиннее 3920 знаков.
+// Ограничение относится только к состоянию корзины, не к каталогу.
+const CART_CODE_MAX = 10;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -214,6 +221,10 @@ function numberKey(digits) {
 
 export function buildSearchIndex(catalog) {
   const roomNames = new Map();
+  const prepositions = new Set([
+    "к", "ко", "для", "под", "подо", "у", "с", "со", "в", "во", "на",
+    "из", "без", "от", "при", "о", "об", "по", "над", "за",
+  ]);
 
   for (const room of catalog.rooms) {
     for (const id of room.sections) {
@@ -239,12 +250,21 @@ export function buildSearchIndex(catalog) {
     const section = catalog.sectionOfItem(code);
     const [prefix, digits] = code.split("-");
     const dimensions = (item.s ?? "").match(/[0-9]+(?:[.,][0-9]+)?/g) ?? [];
+    const normalizedName = normalize(item.n);
+    const nameTokens = normalizedName ? normalizedName.split(" ") : [];
+    const firstPreposition = nameTokens.findIndex((word) => prepositions.has(word));
+    const name = Object.freeze([...new Set(nameTokens)]);
+    // Границу определяем до удаления повторов, сохраняя позиции слов.
+    const mainName = firstPreposition < 0
+      ? name
+      : Object.freeze([...new Set(nameTokens.slice(0, firstPreposition))]);
 
     return Object.freeze({
       code,
       prefix: prefix.toLowerCase(),
       number: numberKey(digits),
-      name: Object.freeze(words(item.n)),
+      name,
+      mainName,
       context: Object.freeze(words(section.name)),
       rooms: roomWords.get(section.id) ?? emptyRoomWords,
       description: Object.freeze(words(item.d)),
@@ -337,11 +357,13 @@ export function search(index, query, { limit } = {}) {
   if (terms.length === 0) return [];
 
   const exactCode = canonicalCode(query.trim());
-  const buckets = Array.from({ length: 6 }, () => []);
+  // Две группы с прежними рангами: обычные и зависимые совпадения.
+  const buckets = Array.from({ length: 12 }, () => []);
 
   for (const entry of index.entries) {
     let rank = 0;
     let matched = true;
+    let dependent = false;
 
     for (const term of terms) {
       const current = termRank(entry, term);
@@ -350,13 +372,24 @@ export function search(index, query, { limit } = {}) {
         break;
       }
 
+      // Ранг 2 означает совпадение слова в названии. Если оно есть
+      // и в главной части, зависимым такое совпадение не считаем.
+      if (
+        current === 2
+        && entry.mainName !== entry.name
+        && !matchesWord(entry.mainName, term)
+      ) {
+        dependent = true;
+      }
+
       // Для запроса с И ранг определяется самым слабым обязательным
       // совпадением: «диван 220» по размеру слабее совпадения обоих слов в имени.
       rank = Math.max(rank, current);
     }
 
     if (matched) {
-      buckets[entry.code === exactCode ? 0 : rank].push(entry.code);
+      const bucket = entry.code === exactCode ? 0 : rank + (dependent ? 6 : 0);
+      buckets[bucket].push(entry.code);
     }
   }
 
@@ -372,6 +405,7 @@ export function parseRoute(hash) {
 
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
   if (path === "/") return home;
+  if (path === "/cart") return { view: "cart" };
 
   const match = /^\/([rsiq])\/([^/]*)$/.exec(path);
   if (!match) return home;
@@ -405,6 +439,8 @@ export function formatRoute(route) {
   switch (route.view) {
     case "home":
       return "#/";
+    case "cart":
+      return "#/cart";
     case "room":
       return validId(route.room) ? `#/r/${route.room}` : "#/";
     case "section":
@@ -427,6 +463,7 @@ export function formatRoute(route) {
 
 export function routeFromStartParam(param) {
   if (typeof param !== "string" || !START_PATTERN.test(param)) return null;
+  if (param === "cart") return { view: "cart" };
 
   const directCode = canonicalCode(param);
   if (directCode) return { view: "item", code: directCode };
@@ -522,4 +559,191 @@ export function plural(n, one, few, many) {
   if (last === 1) return one;
   if (last >= 2 && last <= 4) return few;
   return many;
+}
+
+function cartCode(code) {
+  const canonical = canonicalCode(code);
+  return canonical && canonical.length <= CART_CODE_MAX ? canonical : null;
+}
+
+export function emptyCart() {
+  return { items: [], sent: [] };
+}
+
+export function normalizeCart(state) {
+  if (
+    !isRecord(state)
+    || !Array.isArray(state.items)
+    || !Array.isArray(state.sent)
+  ) {
+    return emptyCart();
+  }
+
+  const items = new Set();
+  for (const value of state.items) {
+    const code = cartCode(value);
+    if (code) items.add(code);
+    if (items.size === CART_LIMIT) break;
+  }
+
+  const sent = new Set();
+  for (const value of state.sent) {
+    const code = cartCode(value);
+    if (code && items.has(code)) sent.add(code);
+  }
+
+  return { items: [...items], sent: [...sent] };
+}
+
+export function cartHas(state, code) {
+  const canonical = cartCode(code);
+  return canonical !== null && normalizeCart(state).items.includes(canonical);
+}
+
+export function cartAdd(state, code) {
+  const cart = normalizeCart(state);
+  const canonical = cartCode(code);
+  if (
+    canonical
+    && cart.items.length < CART_LIMIT
+    && !cart.items.includes(canonical)
+  ) {
+    cart.items.push(canonical);
+  }
+  return cart;
+}
+
+export function cartRemove(state, code) {
+  const cart = normalizeCart(state);
+  const canonical = cartCode(code);
+  return {
+    items: cart.items.filter((value) => value !== canonical),
+    sent: cart.sent.filter((value) => value !== canonical),
+  };
+}
+
+export function cartPending(state) {
+  const cart = normalizeCart(state);
+  const sent = new Set(cart.sent);
+  return cart.items.filter((code) => !sent.has(code));
+}
+
+export function cartMarkSent(state, codes) {
+  const cart = normalizeCart(state);
+  if (!Array.isArray(codes)) return cart;
+
+  const items = new Set(cart.items);
+  const sent = new Set(cart.sent);
+  for (const value of codes) {
+    const code = cartCode(value);
+    if (code && items.has(code)) sent.add(code);
+  }
+  return { items: cart.items, sent: [...sent] };
+}
+
+export function cartResetSent(state) {
+  const cart = normalizeCart(state);
+  return { items: cart.items, sent: [] };
+}
+
+export function serializeCart(state) {
+  const cart = normalizeCart(state);
+  return JSON.stringify({ v: 1, i: cart.items, s: cart.sent });
+}
+
+export function parseCart(text) {
+  if (typeof text !== "string") return emptyCart();
+
+  try {
+    const value = JSON.parse(text);
+    if (
+      !isRecord(value)
+      || value.v !== 1
+      || !Array.isArray(value.i)
+      || !Array.isArray(value.s)
+    ) {
+      return emptyCart();
+    }
+    return normalizeCart({ items: value.i, sent: value.s });
+  } catch {
+    return emptyCart();
+  }
+}
+
+export function cartStartParam(codes) {
+  if (!Array.isArray(codes) || codes.length === 0) return null;
+
+  const unique = new Set();
+  for (const value of codes) {
+    const code = canonicalCode(value);
+    // Любой код должен допускать отправку отдельной частью price_.
+    if (!code || !START_PATTERN.test(`price_${code}`)) return null;
+    unique.add(code);
+  }
+
+  const ordered = [...unique];
+  if (!/^[A-Z]+-[0-9]{3}$/.test(ordered[0])) {
+    return { param: `price_${ordered[0]}`, taken: [ordered[0]] };
+  }
+
+  const groups = new Map();
+  const taken = [];
+  let length = "cart_".length;
+
+  for (const code of ordered) {
+    const match = /^([A-Z]+)-([0-9]{3})$/.exec(code);
+    if (!match) continue;
+
+    const [, prefix, digits] = match;
+    const extra = groups.has(prefix)
+      ? digits.length
+      : prefix.length + digits.length + (groups.size > 0 ? 1 : 0);
+    if (length + extra > 64) continue;
+
+    groups.set(prefix, (groups.get(prefix) ?? "") + digits);
+    taken.push(code);
+    length += extra;
+  }
+
+  if (taken.length === 0) return null;
+  if (taken.length === 1) {
+    return { param: `price_${taken[0]}`, taken };
+  }
+
+  const param = `cart_${[...groups]
+    .map(([prefix, digits]) => prefix + digits)
+    .join("-")}`;
+  return START_PATTERN.test(param) ? { param, taken } : null;
+}
+
+export function cartBotLink(codes) {
+  const part = cartStartParam(codes);
+  return part
+    ? {
+      url: `https://t.me/${BOT_USERNAME}?start=${part.param}`,
+      taken: part.taken,
+    }
+    : null;
+}
+
+export function parseCartParam(param) {
+  if (
+    typeof param !== "string"
+    || !START_PATTERN.test(param)
+    || !param.startsWith("cart_")
+  ) {
+    return null;
+  }
+
+  const codes = new Set();
+  for (const group of param.slice(5).split("-")) {
+    const match = /^([A-Z]+)((?:[0-9]{3})+)$/.exec(group);
+    if (!match || match[0] !== group) return null;
+
+    const [, prefix, digits] = match;
+    for (let i = 0; i < digits.length; i += 3) {
+      codes.add(`${prefix}-${digits.slice(i, i + 3)}`);
+    }
+  }
+  return [...codes];
 }

@@ -8,19 +8,19 @@
   <title>Avelio — каталог</title>
   <link rel="preload" href="fonts/onest-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="app.css?v=85827f72">
+  <link rel="stylesheet" href="app.css?v=14f2cff1">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script type="module" src="app.js?v=99a8c472"></script>
+  <script type="module" src="app.js?v=2e72fb57"></script>
 </head>
 <body>
   <div class="app" id="app">
     <header class="header">
       <div class="brand-row">
         <a class="brand" href="#/" data-route="#/" aria-label="Avelio — на главную">Avelio</a>
-        <span class="brand-caption">Каталог мебели</span>
         <button class="back-button" id="back" type="button" hidden>
           <span aria-hidden="true">←</span> Назад
         </button>
+        <a class="cart-link" href="#/cart" data-route="#/cart" data-cart-link="true">Корзина</a>
       </div>
 
       <form class="search-form" id="search-form" role="search">
@@ -51,6 +51,8 @@
         <p class="muted">Мебель для вашего дома.</p>
       </section>
     </main>
+
+    <footer class="cart-footer" id="cart-footer" aria-label="Запрос цены" hidden></footer>
 
     <noscript>
       <p class="noscript">Чтобы открыть каталог, разрешите JavaScript в браузере.</p>

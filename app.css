@@ -383,9 +383,10 @@ img {
 .thumb {
   position: relative;
   width: 100%;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   border-radius: 15px;
-  background: linear-gradient(135deg, var(--placeholder), var(--surface));
+  background: #3e3e3d;
 }
 
 .thumb img {
@@ -393,8 +394,8 @@ img {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  background: var(--bg);
+  object-fit: cover;
+  object-position: 50% 60%;
   opacity: 0;
   transition: opacity 240ms ease;
 }
@@ -514,7 +515,6 @@ img {
   border-bottom: 1px solid var(--rule);
 }
 
-.cart-skeleton .thumb,
 .cart-skeleton-line {
   background: linear-gradient(
     110deg,
@@ -790,7 +790,7 @@ img {
 }
 
 .gallery-photo {
-  background: var(--bg);
+  background: #3e3e3d;
   opacity: 0;
   transition: opacity 280ms ease;
 }
@@ -1013,4 +1013,3 @@ img {
     scroll-behavior: auto !important;
   }
 }
-

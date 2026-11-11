@@ -627,7 +627,6 @@ function pumpThumbnails() {
 
 function thumbnail(code, item) {
   const frame = element("div", "thumb");
-  frame.style.aspectRatio = `${item.tw} / ${item.th}`;
 
   const url = thumbUrl(code, item);
   if (!url) {
@@ -639,8 +638,8 @@ function thumbnail(code, item) {
     node: frame,
     code,
     url,
-    width: item.tw,
-    height: item.th,
+    width: 600,
+    height: 450,
     image: null,
     status: "idle",
   });
@@ -705,7 +704,6 @@ function renderHome(route) {
       link.append(thumbnail(firstCode, catalog.itemByCode(firstCode)));
     } else {
       const empty = element("div", "thumb");
-      empty.style.aspectRatio = "3 / 2";
       empty.append(element("div", "image-fallback", "Раздел пока пуст"));
       link.append(empty);
     }
@@ -1207,7 +1205,7 @@ function openLayer(code) {
       if (full) {
         add.setAttribute("aria-describedby", limitNote.id);
       } else {
-        add.removeAttribute("aria-describedby");
+        add.removeAttribute("aria-describedby", limitNote.id);
       }
     };
 
@@ -1447,4 +1445,3 @@ writeLocalCart(serializeCart(cart));
 syncChrome();
 restoreCloudCart();
 loadCatalog();
-

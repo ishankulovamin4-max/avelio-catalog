@@ -107,6 +107,12 @@ button:disabled {
   opacity: .45;
 }
 
+.button.is-opening {
+  cursor: progress;
+  opacity: .7;
+  pointer-events: none;
+}
+
 :where(a, button, input, [tabindex]):focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 3px;

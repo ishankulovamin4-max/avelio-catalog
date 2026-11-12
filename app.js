@@ -111,16 +111,72 @@ function botLink(kind, code, className = "button") {
   return node;
 }
 
-function openBotUrl(url) {
-  if (telegram) {
+// С Bot API 7.0 openTelegramLink мини-приложение не закрывает: на iPhone чат
+// с ботом остаётся под каталогом, и человек жмёт «Узнать цену» снова и снова.
+// Поэтому после перехода закрываем каталог сами, а повторные нажатия глушим.
+const BOT_CLOSE_DELAY_MS = 400;
+const BOT_GUARD_MS = 4000;
+let botOpeningUntil = 0;
+
+function botOpening() {
+  return Date.now() < botOpeningUntil;
+}
+
+function telegramClient() {
+  if (telegram) return telegram;
+  // Внутри Telegram без initData (редкий запуск) переход всё равно через клиент.
+  const platform = webApp?.platform;
+  return platform && platform !== "unknown"
+    && typeof webApp.openTelegramLink === "function" ? webApp : null;
+}
+
+function markBotOpening(trigger) {
+  if (!trigger?.isConnected) return;
+
+  const label = trigger.textContent;
+  trigger.textContent = "Открываем чат…";
+  trigger.classList.add("is-opening");
+  trigger.setAttribute("aria-disabled", "true");
+  if (trigger instanceof HTMLButtonElement) trigger.disabled = true;
+
+  window.setTimeout(() => {
+    if (!trigger.isConnected) return;
+    trigger.textContent = label;
+    trigger.classList.remove("is-opening");
+    trigger.removeAttribute("aria-disabled");
+    if (trigger instanceof HTMLButtonElement) trigger.disabled = false;
+  }, BOT_GUARD_MS);
+}
+
+function openBotUrl(url, trigger) {
+  if (botOpening()) return false;
+  botOpeningUntil = Date.now() + BOT_GUARD_MS;
+  markBotOpening(trigger);
+  announce("Открываем чат с ботом");
+
+  const client = telegramClient();
+  if (client) {
     try {
-      telegram.openTelegramLink(url);
-      return;
+      client.openTelegramLink(url);
+      try {
+        client.HapticFeedback?.impactOccurred("medium");
+      } catch {
+        // Тактильный отклик необязателен.
+      }
+      window.setTimeout(() => {
+        try {
+          client.close();
+        } catch {
+          // Старый клиент закрывает мини-приложение сам при переходе.
+        }
+      }, BOT_CLOSE_DELAY_MS);
+      return true;
     } catch {
       // Если клиент не поддерживает переход, используем обычную ссылку.
     }
   }
   window.location.assign(url);
+  return true;
 }
 
 function countText(count) {
@@ -890,11 +946,13 @@ function renderCart() {
     const request = button(label, "button button-primary");
     request.disabled = cartBotLink(pending) === null;
     request.addEventListener("click", () => {
+      if (botOpening()) return;
       const currentPending = cartPending(cart)
         .filter((code) => catalog.itemByCode(code));
       const link = cartBotLink(currentPending);
       if (!link) return;
 
+      // Сначала сохраняем пометку «запрошено»: следом каталог закроется.
       changeCart(cartMarkSent(cart, link.taken));
       openBotUrl(link.url);
     });
@@ -903,6 +961,8 @@ function renderCart() {
     const status = element("p", "cart-complete", "Цена запрошена по всем вещам");
     const again = button("Запросить ещё раз");
     again.addEventListener("click", () => {
+      // Второй тап по кнопке цены попадает сюда, пока открывается чат.
+      if (botOpening()) return;
       changeCart(cartResetSent(cart));
       announce("Можно запросить цену ещё раз");
     });
@@ -1371,7 +1431,7 @@ document.addEventListener("click", (event) => {
 
   if (link.dataset.bot) {
     event.preventDefault();
-    openBotUrl(link.href);
+    openBotUrl(link.href, link);
     return;
   }
 

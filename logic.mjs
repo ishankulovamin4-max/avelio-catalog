@@ -747,3 +747,99 @@ export function parseCartParam(param) {
   }
   return [...codes];
 }
+
+// Отметки для бота (решение владельца 13.11): открыл мини-приложение, сколько смотрел,
+// какие товары — строка в карточке клиента и пункт в сводке дня. Адрес — https-прокси
+// на сервере бота (путь /miniapp/events); пустая строка — отметки не шлются.
+export const EVENTS_URL = "https://avelio.srv2045356.hstgr.cloud/miniapp/events";
+
+const TRACK_CODE = /^[A-Z]+-[0-9]+$/;
+const TRACK_MAX_ITEMS = 100;
+
+// Сеанс шлётся целиком: время на экране и все открытые товары. Бот хранит больший счёт,
+// поэтому потерянная или запоздавшая отметка ничего не портит.
+export function createTracker({
+  url,
+  initData,
+  send,
+  now = () => Date.now(),
+  visible = () => true,
+  random = Math.random,
+  debounceMs = 2000,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  if (typeof url !== "string" || !url.startsWith("https://")) return null;
+  if (typeof initData !== "string" || !initData || typeof send !== "function") return null;
+
+  const session = `${now().toString(36)}-${random().toString(36).slice(2, 12)}`
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .padEnd(8, "0")
+    .slice(0, 64);
+  const items = [];
+  let shownMs = 0;
+  let shownSince = visible() ? now() : null;
+  let lastKey = null;
+  let timer = 0;
+
+  const seconds = () => Math.floor(
+    (shownMs + (shownSince === null ? 0 : Math.max(0, now() - shownSince))) / 1000,
+  );
+
+  function flush() {
+    if (timer) clearTimer(timer);
+    timer = 0;
+    const t = seconds();
+    const key = `${t}|${items.length}`;
+    if (key === lastKey) return false;
+    lastKey = key;
+    try {
+      send(url, JSON.stringify({ d: initData, s: session, t, i: items }));
+    } catch {
+      // Отметка не важнее каталога: сбой отправки не мешает работе.
+    }
+    return true;
+  }
+
+  return {
+    session,
+    seconds,
+    open: flush,
+    item(code) {
+      if (typeof code !== "string" || !TRACK_CODE.test(code)) return;
+      if (items.includes(code) || items.length >= TRACK_MAX_ITEMS) return;
+      items.push(code);
+      if (!timer) timer = setTimer(flush, debounceMs);
+    },
+    hide() {
+      if (shownSince !== null) {
+        shownMs += Math.max(0, now() - shownSince);
+        shownSince = null;
+      }
+      return flush();
+    },
+    show() {
+      if (shownSince === null) shownSince = now();
+    },
+    tick() {
+      return shownSince === null ? false : flush();
+    },
+  };
+}
+
+// text/plain — простой запрос без предварительного CORS; sendBeacon доходит и при закрытии.
+export function beaconSend(url, body, env = globalThis) {
+  try {
+    const blob = new env.Blob([body], { type: "text/plain;charset=UTF-8" });
+    if (env.navigator?.sendBeacon?.(url, blob)) return true;
+  } catch {
+    // Нет sendBeacon — пробуем fetch.
+  }
+  try {
+    env.fetch?.(url, { method: "POST", body, keepalive: true, credentials: "omit" })
+      ?.catch?.(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}

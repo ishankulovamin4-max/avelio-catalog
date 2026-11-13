@@ -23,7 +23,10 @@ import {
   serializeCart,
   parseCart,
   cartBotLink,
-} from "./logic.mjs?v=e7c2a396";
+  EVENTS_URL,
+  createTracker,
+  beaconSend,
+} from "./logic.mjs?v=ec17fb7b";
 
 const BG = "#101112";
 const PAGE_SIZE = 24;
@@ -44,6 +47,15 @@ const cartFooter = document.querySelector("#cart-footer");
 const webApp = window.Telegram?.WebApp;
 const telegram = webApp && typeof webApp.initData === "string"
   && webApp.initData.trim() !== "" ? webApp : null;
+// Отметки для бота: только внутри Telegram и только когда задан EVENTS_URL.
+const tracker = telegram
+  ? createTracker({
+    url: EVENTS_URL,
+    initData: telegram.initData,
+    send: beaconSend,
+    visible: () => document.visibilityState !== "hidden",
+  })
+  : null;
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const session = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1192,6 +1204,7 @@ function closeLayer() {
 
 function openLayer(code) {
   if (dialog.open && layerCode === code) return;
+  tracker?.item(code);
 
   const wasOpen = dialog.open;
   layerCleanup?.();
@@ -1505,3 +1518,14 @@ writeLocalCart(serializeCart(cart));
 syncChrome();
 restoreCloudCart();
 loadCatalog();
+
+if (tracker) {
+  tracker.open();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") tracker.hide();
+    else tracker.show();
+  });
+  window.addEventListener("pagehide", () => tracker.hide());
+  // Telegram может закрыть окно без pagehide — время досылаем каждые 30 с.
+  setInterval(() => tracker.tick(), 30000);
+}

@@ -605,6 +605,9 @@ function startThumbnail(record, visible) {
     thumbnails.delete(record);
 
     if (ok) {
+      if (record.node.classList.contains("thumb--wide")) {
+        prepareWideThumbnail(record.node, image);
+      }
       record.node.classList.add("is-loaded");
     } else {
       image.removeAttribute("src");
@@ -617,6 +620,50 @@ function startThumbnail(record, visible) {
   image.onload = () => finish(true);
   image.onerror = () => finish(false);
   image.src = record.url;
+}
+
+function prepareWideThumbnail(frame, image) {
+  try {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (!width || !height) return;
+
+    frame.style.setProperty(
+      "--thumb-wide-height",
+      `${Math.min(100, 100 * 4 * height / (3 * width))}%`,
+    );
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 48;
+    canvas.height = 2;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    // Читаем только верхнюю и нижнюю строки уже загруженного img.
+    context.fillStyle = "#d8d3cb";
+    context.fillRect(0, 0, 48, 2);
+    context.drawImage(image, 0, 0, width, 1, 0, 0, 48, 1);
+    context.drawImage(image, 0, height - 1, width, 1, 0, 1, 48, 1);
+    const pixels = context.getImageData(0, 0, 48, 2).data;
+
+    for (let row = 0; row < 2; row += 1) {
+      const color = [];
+      for (let channel = 0; channel < 3; channel += 1) {
+        const values = [];
+        for (let x = 0; x < 48; x += 1) {
+          values.push(pixels[(row * 48 + x) * 4 + channel]);
+        }
+        values.sort((a, b) => a - b);
+        color.push(Math.round((values[23] + values[24]) / 2));
+      }
+      frame.style.setProperty(
+        row === 0 ? "--thumb-edge-top" : "--thumb-edge-bottom",
+        `rgb(${color.join(" ")})`,
+      );
+    }
+  } catch {
+    // Недоступный canvas не мешает показать фото и не запускает повтор.
+  }
 }
 
 function pumpThumbnails() {
@@ -700,6 +747,17 @@ function thumbnail(code, item) {
   if (!url) {
     frame.append(fallback(code));
     return frame;
+  }
+
+  const tw = item?.tw;
+  const th = item?.th;
+  if (
+    Number.isFinite(tw) && tw > 0
+    && Number.isFinite(th) && th > 0
+    && tw / th >= 1.8
+  ) {
+    frame.classList.add("thumb--wide");
+    frame.style.setProperty("--thumb-wide-height", `${100 * 4 * th / (3 * tw)}%`);
   }
 
   thumbnails.add({

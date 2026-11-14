@@ -410,6 +410,49 @@ img {
   opacity: 1;
 }
 
+.thumb--wide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--thumb-edge-top, #d8d3cb) calc((100% - var(--thumb-wide-height)) / 2),
+    var(--thumb-edge-bottom, #d8d3cb) calc((100% + var(--thumb-wide-height)) / 2)
+  );
+  filter: brightness(.86);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+
+/* Цвета краёв готовятся до появления фото; второго URL у подложки нет. */
+.thumb--wide.is-loaded::before {
+  opacity: 1;
+}
+
+.thumb--wide img {
+  inset: 50% 0 auto;
+  height: var(--thumb-wide-height);
+  transform: translateY(-50%);
+  object-fit: contain;
+  object-position: center;
+  filter: brightness(.86);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 3%,
+    #000 97%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 3%,
+    #000 97%,
+    transparent
+  );
+}
+
 .image-fallback {
   position: absolute;
   inset: 0;
